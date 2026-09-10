@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-أتمتة شراء بطاقات Umniah PUBG - النسخة الاحترافية النهائية
+أتمتة شراء بطاقات Umniah PUBG - النسخة المتوازية (4 متصفحات بنفس الوقت)
 """
 
 import subprocess
@@ -11,6 +11,7 @@ import requests
 import os
 import threading
 from datetime import datetime
+from multiprocessing import Process
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -47,7 +48,15 @@ WAIT_TIME = 12
 PAGE_LOAD_TIME = 2.5
 SUCCESS_WAIT_TIME = 10
 FAST_WAIT = 0.05
-SLEEP_BEFORE_ORDER = 1  # ⭐ تحكم فيه
+SLEEP_BEFORE_ORDER = 1
+
+# ⭐ ملفات الأرقام (اضبطها حسب اللي عندك)
+WALLET_FILES = [
+    "lu1.txt",
+    "lu2.txt",
+    "lu3.txt",
+    "lu4.txt"
+]
 
 # ============================================================================
 # إدارة الأرقام
@@ -61,22 +70,19 @@ class WalletManager:
         self.load_wallets()
     
     def load_wallets(self):
-        """قراءة الأرقام من lu.txt"""
+        """قراءة الأرقام من الملف"""
         if not os.path.exists(self.filename):
-            print("❌ ملف lu.txt غير موجود!")
             return False
         
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
                 self.wallets = [line.strip() for line in f if line.strip()]
-            print(f"✅ تم قراءة {len(self.wallets)} رقم\n")
             return True
         except Exception as e:
-            print(f"❌ خطأ: {e}")
             return False
     
     def remove_wallet(self, wallet):
-        """حذف رقم من lu.txt"""
+        """حذف رقم من الملف"""
         with self.lock:
             try:
                 with open(self.filename, 'r', encoding='utf-8') as f:
@@ -163,12 +169,12 @@ def fill_fast(driver, xpath, text):
         pass
     return False
 
-def send_telegram_async(wallet_number):
+def send_telegram_async(wallet_number, instance_num):
     """إرسال للتليجرام بدون انتظار"""
     def send():
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            text = f"✅ نجح!\n━━━━━━━━━━\n📱 المحفظة: {wallet_number}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            text = f"✅ نجح!\n━━━━━━━━━━\n📱 المحفظة: {wallet_number}\n🔹 العملية #{instance_num}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
         except:
             pass
@@ -184,9 +190,9 @@ def run_purchase(driver, wallet_number):
     """
     تشغيل عملية الشراء
     Returns:
-        "success" = وصل صفحة النجاح + رسالة النجاح (حذف + إرسال بوت)
-        "reached_wallet" = وصل صفحة إدخال المحفظة بدون رسالة (حذف، بدون بوت)
-        "network_error" = خطأ نت (لا تحذف)
+        "success" = حذف + إرسال بوت
+        "reached_wallet" = حذف، بدون بوت
+        "network_error" = لا تحذف
     """
     try:
         # الخطوة 1: إضافة للسلة
@@ -290,7 +296,6 @@ def run_purchase(driver, wallet_number):
         
         time.sleep(0.3)
         
-        # ✅ وصل هنا = وصل صفحة إدخال المحفظة (حذف بدون بوت)
         reached_wallet_page = True
         
         # الخطوة 9: إرسال رمز التحقق
@@ -348,18 +353,18 @@ def run_purchase(driver, wallet_number):
         return "network_error"
 
 # ============================================================================
-# البرنامج الرئيسي
+# معالج كل عملية (لكل ملف أرقام)
 # ============================================================================
 
-def main():
-    print("\n" + "=" * 70)
-    print("🚀 أتمتة شراء Umniah PUBG")
-    print("=" * 70 + "\n")
-    
-    manager = WalletManager()
+def process_wallet_file(wallet_file, instance_num):
+    """معالج لكل ملف أرقام في عملية منفصلة"""
+    manager = WalletManager(wallet_file)
     
     if not manager.wallets:
+        print(f"[#️⃣ {instance_num}] ❌ ملف فارغ: {wallet_file}")
         return
+    
+    print(f"[#️⃣ {instance_num}] ✅ بدء المعالجة: {wallet_file} ({len(manager.wallets)} رقم)")
     
     total = len(manager.wallets)
     successful = 0
@@ -368,8 +373,9 @@ def main():
     retry_wallets = []
     
     try:
+        # المعالجة الأولية
         for idx, wallet in enumerate(manager.wallets[:]):
-            print(f"[{idx + 1}/{total}] {wallet}", end=" → ")
+            print(f"[#️⃣ {instance_num}] [{idx + 1}/{total}] {wallet}", end=" → ")
             
             try:
                 driver = setup_driver()
@@ -378,7 +384,7 @@ def main():
                 if result == "success":
                     print("✅")
                     manager.remove_wallet(wallet)
-                    send_telegram_async(wallet)
+                    send_telegram_async(wallet, instance_num)
                     successful += 1
                 elif result == "reached_wallet":
                     print("⊘")
@@ -403,10 +409,10 @@ def main():
         
         # إعادة محاولة
         if retry_wallets:
-            print(f"\n🔄 إعادة محاولة {len(retry_wallets)}\n")
+            print(f"\n[#️⃣ {instance_num}] 🔄 إعادة محاولة {len(retry_wallets)}\n")
             
             for wallet in retry_wallets:
-                print(f"   {wallet}", end=" → ")
+                print(f"[#️⃣ {instance_num}]    {wallet}", end=" → ")
                 
                 try:
                     driver = setup_driver()
@@ -415,7 +421,7 @@ def main():
                     if result == "success":
                         print("✅")
                         manager.remove_wallet(wallet)
-                        send_telegram_async(wallet)
+                        send_telegram_async(wallet, instance_num)
                         successful += 1
                     elif result == "reached_wallet":
                         print("⊘")
@@ -436,12 +442,7 @@ def main():
                 
                 time.sleep(0.3)
         
-        print("\n" + "=" * 70)
-        print(f"✅ النتيجة:")
-        print(f"   🎉 نجح + إرسال: {successful}")
-        print(f"   ⊘ وصل محفظة: {reached_wallet}")
-        print(f"   📊 متبقي: {manager.get_remaining()}")
-        print("=" * 70 + "\n")
+        print(f"\n[#️⃣ {instance_num}] ✅ النتيجة: ✅{successful} | ⊘{reached_wallet} | 📊{manager.get_remaining()}")
         
     except Exception:
         pass
@@ -452,6 +453,38 @@ def main():
                 driver.quit()
             except:
                 pass
+
+# ============================================================================
+# البرنامج الرئيسي
+# ============================================================================
+
+def main():
+    print("\n" + "=" * 70)
+    print("🚀 أتمتة شراء Umniah PUBG - النسخة المتوازية (4 متصفحات)")
+    print("=" * 70 + "\n")
+    
+    # التحقق من وجود ملفات الأرقام
+    for i, wallet_file in enumerate(WALLET_FILES, 1):
+        if not os.path.exists(wallet_file):
+            print(f"⚠️  تحذير: ملف {wallet_file} غير موجود (العملية #{i})")
+    
+    print()
+    
+    # إنشاء 4 عمليات منفصلة
+    processes = []
+    
+    for i, wallet_file in enumerate(WALLET_FILES, 1):
+        p = Process(target=process_wallet_file, args=(wallet_file, i))
+        processes.append(p)
+        p.start()
+    
+    # انتظر انتهاء جميع العمليات
+    for p in processes:
+        p.join()
+    
+    print("\n" + "=" * 70)
+    print("✅ انتهت جميع العمليات!")
+    print("=" * 70 + "\n")
 
 if __name__ == "__main__":
     main()
