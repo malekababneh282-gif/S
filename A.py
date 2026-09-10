@@ -39,6 +39,7 @@ install_requirements()
 # ============================================================================
 PRODUCT_URL = "https://eshop.umniah.com/ar/بطاقة-هدية-ببجي-600-يو-سي.html"
 CHECKOUT_URL = "https://eshop.umniah.com/ar/checkout/index/"
+SUCCESS_URL = "https://eshop.umniah.com/ar/checkout/onepage/success"
 
 PHONE = "797230107"
 EMAIL = "ggssgg@gmail.com"
@@ -50,6 +51,7 @@ TELEGRAM_CHAT_ID = "6873334348"
 
 WAIT_TIME = 20
 PAGE_LOAD_TIME = 4
+SUCCESS_WAIT_TIME = 10  # 10 ثواني الانتظار على صفحة النجاح
 
 # ============================================================================
 # ملف تتبع التقدم
@@ -143,12 +145,12 @@ def fill_input(driver, xpath, text):
     except:
         return False
 
-def send_telegram(message, status="success"):
+def send_telegram(wallet_number, message, status="success"):
     """إرسال رسالة للتليجرام"""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         status_emoji = "✅" if status == "success" else "❌"
-        text = f"{status_emoji} نتيجة الشراء:\n━━━━━━━━━━\n📱 رقم: {PHONE}\n💬 {message}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        text = f"{status_emoji} نتيجة الشراء:\n━━━━━━━━━━\n📱 رقم المحفظة: {wallet_number}\n💬 {message}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
         if response.status_code == 200:
             print("✅ تم إرسال الرسالة للتليجرام\n")
@@ -519,7 +521,7 @@ def step7_wallet_otp(driver, wallet_number):
         return True
         
     except TimeoutException:
-        print("❌ لم يتم العثور على حقل المحفظة")
+        print("❌ لم يتم العثور على حقل المحفظ��")
         return False
     except Exception as e:
         print(f"❌ خطأ: {e}")
@@ -527,130 +529,48 @@ def step7_wallet_otp(driver, wallet_number):
         traceback.print_exc()
         return False
 
-def step8_check_result(driver):
-    """الخطوة 8: التحقق من النتيجة"""
-    print("📍 الخطوة 8: التحقق من النتيجة")
+def step8_check_result(driver, wallet_number):
+    """الخطوة 8: التحقق من النتيجة والانتظار على صفحة النجاح"""
+    print("📍 الخطوة 8: التحقق من النتيجة والانتظار على صفحة النجاح")
     
-    time.sleep(2)
+    print(f"\n⏳ جاري الانتظار للنتيجة من UWallet...")
+    print(f"⏳ سيتم الانتظار لمدة {SUCCESS_WAIT_TIME} ثواني على صفحة النجاح...\n")
     
-    try:
-        # البحث عن alert أو message أي نوع
-        print("🔍 البحث عن رسائل النتيجة...")
+    start_time = time.time()
+    success_message_found = False
+    
+    for i in range(SUCCESS_WAIT_TIME):
+        remaining = SUCCESS_WAIT_TIME - i
+        print(f"⏳ {remaining}s...", end="\r")
+        time.sleep(1)
         
-        # جرب البحث عن عناصر مختلفة
-        result_xpaths = [
-            "//div[contains(@class, 'alert')]",
-            "//div[contains(@class, 'message')]",
-            "//div[contains(@class, 'success')]",
-            "//div[contains(@class, 'error')]",
-            "//div[contains(@class, 'notification')]",
-            "//p[contains(@class, 'alert') or contains(@class, 'message')]",
-            "//span[contains(., 'نجح') or contains(., 'فشل') or contains(., 'تم')]"
-        ]
-        
-        result_element = None
-        result_text = ""
-        result_class = ""
-        
-        for xpath in result_xpaths:
-            try:
-                elements = driver.find_elements(By.XPATH, xpath)
-                if elements:
-                    # خذ أول عنصر مرئي
-                    for el in elements:
-                        try:
-                            if el.is_displayed():
-                                result_element = el
-                                result_text = el.text or ""
-                                result_class = el.get_attribute("class") or ""
-                                if result_text.strip():
-                                    print(f"✅ وجدت رسالة عبر: {xpath}")
-                                    break
-                        except:
-                            pass
-                    if result_text.strip():
-                        break
-            except:
-                pass
-        
-        # إذا ما وجدت شيء، حاول JavaScript
-        if not result_text:
-            print("⚠️ لم نجد رسالة - محاولة JavaScript...")
-            result_text = driver.execute_script("""
-                // ابحث عن أي رسالة
-                var selectors = [
-                    '.alert',
-                    '.message',
-                    '.notification',
-                    '[class*="success"]',
-                    '[class*="error"]'
-                ];
-                
-                for (var sel of selectors) {
-                    var els = document.querySelectorAll(sel);
-                    for (var el of els) {
-                        if (el.offsetParent !== null && el.innerText) {
-                            return el.innerText;
-                        }
-                    }
-                }
-                
-                // ابحث عن أي text يحتوي كلمات مهمة
-                var allText = document.body.innerText;
-                if (allText.includes('نجح') || allText.includes('فشل') || allText.includes('تم')) {
-                    return allText.substring(0, 500);
-                }
-                
-                return null;
-            """)
-        
-        if not result_text:
-            print("❌ لم يتم العثور على أي رسالة")
-            # حتى لو ما وجدنا رسالة، اطبع الـ URL الحالي
+        # تحقق من الـ URL
+        try:
             current_url = driver.current_url
-            print(f"📍 الـ URL الحالي: {current_url}")
-            
-            # اطبع محتوى الصفحة
-            page_text = driver.execute_script("return document.body.innerText;")
-            print(f"📄 محتوى الصفحة:\n{page_text[:500]}")
-            
-            # أرسل رسالة للتليجرام على أي حال
-            send_telegram(f"✅ انتهت العملية بنجاح\nURL: {current_url}", status="success")
-            print("✅ تمت الخطوة 8\n")
-            return True
-        
-        print(f"📋 النتيجة: {result_text[:200]}")
-        
-        # تحقق من نوع الرسالة
-        is_success = any(word in result_text.lower() for word in ['نجح', 'تم', 'success', 'confirmed']) or \
-                     any(word in result_class.lower() for word in ['success', 'green', 'passed'])
-        
-        is_error = any(word in result_text.lower() for word in ['فشل', 'خطأ', 'error', 'failed']) or \
-                   any(word in result_class.lower() for word in ['error', 'danger', 'red', 'failed'])
-        
-        if is_success or ('نجح' in result_text or 'تم' in result_text):
-            print("✅ النتيجة: نجح")
-            send_telegram(f"✅ تم الطلب بنجاح!\n{result_text[:200]}", status="success")
-            return True
-        elif is_error or ('فشل' in result_text or 'خطأ' in result_text):
-            print("❌ النتيجة: فشل")
-            send_telegram(f"❌ فشل الطلب\n{result_text[:200]}", status="error")
-            return False
-        else:
-            print("⚠️ النتيجة: غير واضحة")
-            send_telegram(f"✅ انتهت العملية\n{result_text[:200]}", status="success")
-            return True
-        
-    except Exception as e:
-        print(f"❌ خطأ في التحقق: {e}")
-        import traceback
-        traceback.print_exc()
-        
-        # أرسل رسالة التليجرام على أي حال
-        current_url = driver.current_url
-        send_telegram(f"✅ انتهت العملية\nURL: {current_url}", status="success")
-        print("✅ تمت الخطوة 8\n")
-        return True
+            if SUCCESS_URL in current_url:
+                print(f"\n✅ وصلنا لصفحة النجاح!")
+                
+                # ابحث عن رسالة النجاح
+                page_text = driver.execute_script("return document.body.innerText;")
+                
+                if "تم ارسال رمز التحقق بنجاح" in page_text:
+                    print("✅ وجدنا رسالة: تم ارسال رمز التحقق بنجاح!")
+                    success_message_found = True
+                    
+                    # أرسل للتليجرام
+                    send_telegram(wallet_number, "تم ارسال رمز التحقق بنجاح!", status="success")
+                    return True
+        except:
+            pass
+    
+    print("\n")
+    
+    if not success_message_found:
+        print("❌ لم نصل لرسالة النجاح المطلوبة")
+        return False
+    
+    print("✅ تمت الخطوة 8\n")
+    return True
 
 # ============================================================================
 # البرنامج الرئيسي
@@ -711,26 +631,8 @@ def main():
                         break
                 
                 if not step_failed:
-                    # انتظر للنتيجة
-                    print("\n⏳ جاري الانتظار للنتيجة من UWallet...")
-                    print("⏳ سيتم الانتظار لمدة 60 ثانية...\n")
-                    
-                    for i in range(60):
-                        remaining = 60 - i
-                        print(f"⏳ {remaining}s...", end="\r")
-                        time.sleep(1)
-                        
-                        # تحقق كل 5 ثواني
-                        if i % 5 == 0 and i != 0:
-                            try:
-                                current_url = driver.current_url
-                                print(f"\n📍 الـ URL: {current_url}")
-                            except:
-                                pass
-                    
-                    print("\n")
-                    # الآن تحقق من النتيجة
-                    success = step8_check_result(driver)
+                    # تحقق من النتيجة والانتظار
+                    success = step8_check_result(driver, wallet)
                     
                     if success:
                         print(f"✅ نجحت عملية الرقم: {wallet}")
@@ -785,21 +687,13 @@ def main():
                             break
                     
                     if not step_failed:
-                        # انتظر للنتيجة
-                        print("\n⏳ جاري الانتظار للنتيجة من UWallet...")
-                        print("⏳ سيتم الانتظار لمدة 60 ثانية...\n")
-                        
-                        for i in range(60):
-                            remaining = 60 - i
-                            print(f"⏳ {remaining}s...", end="\r")
-                            time.sleep(1)
-                        
-                        print("\n")
-                        # الآن تحقق من النتيجة
-                        success = step8_check_result(driver)
+                        # تحقق من النتيجة والانتظار
+                        success = step8_check_result(driver, wallet)
                         
                         if success:
                             print(f"✅ نجحت عملية الرقم بعد الإعادة: {wallet}")
+                        else:
+                            print(f"❌ فشلت عملية الرقم بعد الإعادة: {wallet}")
                 
                 except Exception as e:
                     print(f"❌ خطأ في إعادة محاولة الرقم {wallet}: {e}")
