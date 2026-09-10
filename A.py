@@ -44,10 +44,10 @@ TELEGRAM_TOKEN = "7327256170:AAEiQ_F_BI1V9iUHzgPPui7JRwqGnj6Jys4"
 TELEGRAM_CHAT_ID = "6873334348"
 
 WAIT_TIME = 12
-PAGE_LOAD_TIME = 2.5  # ⬅️ زيادة لتحميل أفضل للصفحات
+PAGE_LOAD_TIME = 2.5
 SUCCESS_WAIT_TIME = 10
 FAST_WAIT = 0.05
-SLEEP_BEFORE_ORDER = 1  # ⬅️ ⭐ المتغير - تحكم فيه هنا قبل ضغط "إجراء الطلب"
+SLEEP_BEFORE_ORDER = 1  # ⭐ تحكم فيه
 
 # ============================================================================
 # إدارة الأرقام
@@ -181,17 +181,23 @@ def send_telegram_async(wallet_number):
 # ============================================================================
 
 def run_purchase(driver, wallet_number):
-    """تشغيل عملية الشراء"""
+    """
+    تشغيل عملية الشراء
+    Returns:
+        "success" = وصل صفحة النجاح + رسالة النجاح (حذف + إرسال بوت)
+        "reached_wallet" = وصل صفحة إدخال المحفظة بدون رسالة (حذف، بدون بوت)
+        "network_error" = خطأ نت (لا تحذف)
+    """
     try:
         # الخطوة 1: إضافة للسلة
         driver.get(PRODUCT_URL)
         time.sleep(PAGE_LOAD_TIME)
         
         if not fill_fast(driver, "//input[@name='qty']", "2"):
-            return "error_load"
+            return "network_error"
         
         if not click_fast(driver, "//button[@id='product-addtocart-button']"):
-            return "error_load"
+            return "network_error"
         
         time.sleep(1)
         
@@ -249,8 +255,8 @@ def run_purchase(driver, wallet_number):
                 arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
             """, checkbox)
         
-        # الخطوة 6: ⭐ الانتظار قبل الضغط على إجراء الطلب
-        time.sleep(SLEEP_BEFORE_ORDER)  # ⬅️ استخدام المتغير هنا
+        # الخطوة 6: الانتظار قبل الضغط على إجراء الطلب
+        time.sleep(SLEEP_BEFORE_ORDER)
         
         # الخطوة 7: إجراء الطلب
         order_xpaths = [
@@ -266,7 +272,7 @@ def run_purchase(driver, wallet_number):
                 break
         
         if not clicked:
-            return "error_order"
+            return "network_error"
         
         time.sleep(2)
         
@@ -274,7 +280,7 @@ def run_purchase(driver, wallet_number):
         wallet_input = wait_element(driver, By.ID, "phone_number", WAIT_TIME)
         
         if not wallet_input:
-            return "error_wallet"
+            return "network_error"
         
         driver.execute_script("""
             arguments[0].value = arguments[1];
@@ -283,6 +289,9 @@ def run_purchase(driver, wallet_number):
         """, wallet_input, wallet_number)
         
         time.sleep(0.3)
+        
+        # ✅ وصل هنا = وصل صفحة إدخال المحفظة (حذف بدون بوت)
+        reached_wallet_page = True
         
         # الخطوة 9: إرسال رمز التحقق
         send_button_xpaths = [
@@ -312,7 +321,7 @@ def run_purchase(driver, wallet_number):
                     pass
         
         if not send_button:
-            return "error_send"
+            return "reached_wallet" if reached_wallet_page else "network_error"
         
         driver.execute_script("""
             arguments[0].disabled = false;
@@ -333,10 +342,10 @@ def run_purchase(driver, wallet_number):
             except:
                 pass
         
-        return "no_success"
+        return "reached_wallet" if reached_wallet_page else "network_error"
         
     except Exception as e:
-        return "error_exception"
+        return "network_error"
 
 # ============================================================================
 # البرنامج الرئيسي
@@ -354,6 +363,7 @@ def main():
     
     total = len(manager.wallets)
     successful = 0
+    reached_wallet = 0
     driver = None
     retry_wallets = []
     
@@ -370,9 +380,11 @@ def main():
                     manager.remove_wallet(wallet)
                     send_telegram_async(wallet)
                     successful += 1
-                elif result == "no_success":
+                elif result == "reached_wallet":
                     print("⊘")
-                else:
+                    manager.remove_wallet(wallet)
+                    reached_wallet += 1
+                else:  # network_error
                     print("⚠️")
                     retry_wallets.append(wallet)
                 
@@ -405,11 +417,15 @@ def main():
                         manager.remove_wallet(wallet)
                         send_telegram_async(wallet)
                         successful += 1
-                    else:
+                    elif result == "reached_wallet":
                         print("⊘")
+                        manager.remove_wallet(wallet)
+                        reached_wallet += 1
+                    else:
+                        print("⚠️")
                 
                 except Exception:
-                    print("⊘")
+                    print("⚠️")
                 
                 finally:
                     if driver:
@@ -421,7 +437,10 @@ def main():
                 time.sleep(0.3)
         
         print("\n" + "=" * 70)
-        print(f"✅ النتيجة: {successful} نجح | {manager.get_remaining()} متبقي")
+        print(f"✅ النتيجة:")
+        print(f"   🎉 نجح + إرسال: {successful}")
+        print(f"   ⊘ وصل محفظة: {reached_wallet}")
+        print(f"   📊 متبقي: {manager.get_remaining()}")
         print("=" * 70 + "\n")
         
     except Exception:
