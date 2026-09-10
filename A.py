@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-أتمتة شراء بطاقات Umniah PUBG - النسخة الاحترافية النظيفة
-Umniah PUBG Card Purchase Automation - Professional Clean Version
+أتمتة شراء بطاقات Umniah PUBG - النسخة الاحترافية النهائية
 """
 
 import subprocess
@@ -31,7 +30,7 @@ def install_requirements():
 install_requirements()
 
 # ============================================================================
-# البيانات
+# البيانات والإعدادات
 # ============================================================================
 PRODUCT_URL = "https://eshop.umniah.com/ar/بطاقة-هدية-ببجي-600-يو-سي.html"
 CHECKOUT_URL = "https://eshop.umniah.com/ar/checkout/index/"
@@ -45,9 +44,10 @@ TELEGRAM_TOKEN = "7327256170:AAEiQ_F_BI1V9iUHzgPPui7JRwqGnj6Jys4"
 TELEGRAM_CHAT_ID = "6873334348"
 
 WAIT_TIME = 12
-PAGE_LOAD_TIME = 1.5
+PAGE_LOAD_TIME = 2.5  # ⬅️ زيادة لتحميل أفضل للصفحات
 SUCCESS_WAIT_TIME = 10
 FAST_WAIT = 0.05
+SLEEP_BEFORE_ORDER = 1  # ⬅️ ⭐ المتغير - تحكم فيه هنا قبل ضغط "إجراء الطلب"
 
 # ============================================================================
 # إدارة الأرقام
@@ -69,10 +69,10 @@ class WalletManager:
         try:
             with open(self.filename, 'r', encoding='utf-8') as f:
                 self.wallets = [line.strip() for line in f if line.strip()]
-            print(f"✅ تم قراءة {len(self.wallets)} رقم محفظة\n")
+            print(f"✅ تم قراءة {len(self.wallets)} رقم\n")
             return True
         except Exception as e:
-            print(f"❌ خطأ في قراءة lu.txt: {e}")
+            print(f"❌ خطأ: {e}")
             return False
     
     def remove_wallet(self, wallet):
@@ -93,13 +93,17 @@ class WalletManager:
                 return True
             except:
                 return False
+    
+    def get_remaining(self):
+        """الأرقام المتبقية"""
+        return len(self.wallets)
 
 # ============================================================================
 # إعداد المتصفح
 # ============================================================================
 
 def setup_driver():
-    """إعداد المتصفح للسرعة القصوى"""
+    """إعداد المتصفح"""
     opts = Options()
     opts.add_argument("--start-maximized")
     opts.add_argument("--disable-blink-features=AutomationControlled")
@@ -110,7 +114,6 @@ def setup_driver():
     opts.add_argument("--disable-images")
     opts.add_argument("--disable-sync")
     opts.add_argument("--disable-translate")
-    opts.add_argument("--disable-default-apps")
     opts.add_argument("--no-default-browser-check")
     opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
     
@@ -160,12 +163,12 @@ def fill_fast(driver, xpath, text):
         pass
     return False
 
-def send_telegram_async(wallet_number, message):
-    """إرسال للتليجرام بشكل غير متزامن"""
+def send_telegram_async(wallet_number):
+    """إرسال للتليجرام بدون انتظار"""
     def send():
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            text = f"✅ نجح!\n━━━━━━━━━━\n📱 المحفظة: {wallet_number}\n💬 {message}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            text = f"✅ نجح!\n━━━━━━━━━━\n📱 المحفظة: {wallet_number}\n⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
             requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
         except:
             pass
@@ -178,32 +181,25 @@ def send_telegram_async(wallet_number, message):
 # ============================================================================
 
 def run_purchase(driver, wallet_number):
-    """تشغيل عملية الشراء كاملة"""
+    """تشغيل عملية الشراء"""
     try:
         # الخطوة 1: إضافة للسلة
-        print("  ➤ إضافة للسلة...", end=" ", flush=True)
         driver.get(PRODUCT_URL)
         time.sleep(PAGE_LOAD_TIME)
         
         if not fill_fast(driver, "//input[@name='qty']", "2"):
-            print("❌")
-            return False
+            return "error_load"
         
         if not click_fast(driver, "//button[@id='product-addtocart-button']"):
-            print("❌")
-            return False
+            return "error_load"
         
         time.sleep(1)
-        print("✅")
         
         # الخطوة 2: الانتقال للدفع
-        print("  ➤ الانتقال للدفع...", end=" ", flush=True)
         driver.get(CHECKOUT_URL)
         time.sleep(PAGE_LOAD_TIME)
-        print("✅")
         
         # الخطوة 3: ملء البيانات
-        print("  ➤ ملء البيانات...", end=" ", flush=True)
         fill_fast(driver, "//input[@id='customer-email']", EMAIL)
         
         phone_element = wait_element(driver, By.ID, "phoneNumber", 5)
@@ -222,10 +218,7 @@ def run_purchase(driver, wallet_number):
                 arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
             """, name_element, FULL_NAME)
         
-        print("✅")
-        
         # الخطوة 4: اختيار الدفع
-        print("  ➤ اختيار UWallet...", end=" ", flush=True)
         driver.execute_script("window.scrollBy(0, 300);")
         time.sleep(FAST_WAIT)
         
@@ -244,25 +237,22 @@ def run_purchase(driver, wallet_number):
                 if 'uwallet' in label_text.lower():
                     driver.execute_script("arguments[0].click();", radio)
                     time.sleep(FAST_WAIT)
-                    print("✅")
                     break
             except:
                 pass
-        else:
-            print("✅")
         
         # الخطوة 5: الشروط
-        print("  ➤ قبول الشروط...", end=" ", flush=True)
         checkbox = wait_element(driver, By.XPATH, "//input[@type='checkbox' and @class='checkbox required-entry']", 5)
         if checkbox and not checkbox.is_selected():
             driver.execute_script("""
                 arguments[0].checked = true;
                 arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
             """, checkbox)
-        print("✅")
         
-        # الخطوة 6: إجراء الطلب
-        print("  ➤ إجراء الطلب...", end=" ", flush=True)
+        # الخطوة 6: ⭐ الانتظار قبل الضغط على إجراء الطلب
+        time.sleep(SLEEP_BEFORE_ORDER)  # ⬅️ استخدام المتغير هنا
+        
+        # الخطوة 7: إجراء الطلب
         order_xpaths = [
             "//button[contains(@class, 'place-order')]",
             "//button[contains(text(), 'إجراء الطلب')]",
@@ -276,19 +266,15 @@ def run_purchase(driver, wallet_number):
                 break
         
         if not clicked:
-            print("❌")
-            return False
+            return "error_order"
         
         time.sleep(2)
-        print("✅")
         
-        # الخطوة 7: إدخال المحفظة
-        print("  ➤ إدخال المحفظة...", end=" ", flush=True)
+        # الخطوة 8: إدخال المحفظة
         wallet_input = wait_element(driver, By.ID, "phone_number", WAIT_TIME)
         
         if not wallet_input:
-            print("❌")
-            return False
+            return "error_wallet"
         
         driver.execute_script("""
             arguments[0].value = arguments[1];
@@ -297,10 +283,8 @@ def run_purchase(driver, wallet_number):
         """, wallet_input, wallet_number)
         
         time.sleep(0.3)
-        print("✅")
         
-        # الخطوة 8: الضغط على الإرسال
-        print("  ➤ إرسال رمز التحقق...", end=" ", flush=True)
+        # الخطوة 9: إرسال رمز التحقق
         send_button_xpaths = [
             "//button[contains(@class, 'btn-primary') and contains(., 'إرسال')]",
             "//button[contains(text(), 'إرسال رمز التحقق')]",
@@ -328,8 +312,7 @@ def run_purchase(driver, wallet_number):
                     pass
         
         if not send_button:
-            print("❌")
-            return False
+            return "error_send"
         
         driver.execute_script("""
             arguments[0].disabled = false;
@@ -337,11 +320,7 @@ def run_purchase(driver, wallet_number):
             arguments[0].click();
         """, send_button)
         
-        print("✅")
-        
-        # الخطوة 9: انتظر النتيجة
-        print("  ➤ انتظار النتيجة...", end=" ", flush=True)
-        
+        # الخطوة 10: انتظر النتيجة
         for i in range(SUCCESS_WAIT_TIME):
             time.sleep(1)
             
@@ -350,16 +329,14 @@ def run_purchase(driver, wallet_number):
                 if SUCCESS_URL in current_url:
                     page_text = driver.execute_script("return document.body.innerText;")
                     if "تم ارسال رمز التحقق بنجاح" in page_text:
-                        print("✅")
-                        return True
+                        return "success"
             except:
                 pass
         
-        print("❌")
-        return False
+        return "no_success"
         
-    except Exception:
-        return False
+    except Exception as e:
+        return "error_exception"
 
 # ============================================================================
 # البرنامج الرئيسي
@@ -378,29 +355,30 @@ def main():
     total = len(manager.wallets)
     successful = 0
     driver = None
-    retry_list = []
+    retry_wallets = []
     
     try:
-        # معالجة جميع الأرقام
         for idx, wallet in enumerate(manager.wallets[:]):
-            print(f"[{idx + 1}/{total}] 📱 {wallet}")
+            print(f"[{idx + 1}/{total}] {wallet}", end=" → ")
             
             try:
                 driver = setup_driver()
-                success = run_purchase(driver, wallet)
+                result = run_purchase(driver, wallet)
                 
-                if success:
-                    print(f"       🎉 نجح!\n")
+                if result == "success":
+                    print("✅")
                     manager.remove_wallet(wallet)
-                    send_telegram_async(wallet, "تم ارسال رمز التحقق بنجاح!")
+                    send_telegram_async(wallet)
                     successful += 1
+                elif result == "no_success":
+                    print("⊘")
                 else:
-                    print(f"       ⚠️ إعادة محاولة لاحقاً\n")
-                    retry_list.append(wallet)
+                    print("⚠️")
+                    retry_wallets.append(wallet)
                 
             except Exception:
-                print(f"       ⚠️ إعادة محاولة لاحقاً\n")
-                retry_list.append(wallet)
+                print("⚠️")
+                retry_wallets.append(wallet)
             
             finally:
                 if driver:
@@ -409,29 +387,29 @@ def main():
                     except:
                         pass
             
-            time.sleep(0.5)
+            time.sleep(0.3)
         
-        # إعادة محاولة الأرقام الفاشلة
-        if retry_list:
-            print(f"\n🔄 إعادة محاولة {len(retry_list)} رقم\n")
+        # إعادة محاولة
+        if retry_wallets:
+            print(f"\n🔄 إعادة محاولة {len(retry_wallets)}\n")
             
-            for wallet in retry_list:
-                print(f"   🔄 {wallet}", end=" ")
+            for wallet in retry_wallets:
+                print(f"   {wallet}", end=" → ")
                 
                 try:
                     driver = setup_driver()
-                    success = run_purchase(driver, wallet)
+                    result = run_purchase(driver, wallet)
                     
-                    if success:
-                        print(f"✅\n")
+                    if result == "success":
+                        print("✅")
                         manager.remove_wallet(wallet)
-                        send_telegram_async(wallet, "تم ارسال رمز التحقق بنجاح! (إعادة محاولة)")
+                        send_telegram_async(wallet)
                         successful += 1
                     else:
-                        print(f"❌\n")
+                        print("⊘")
                 
                 except Exception:
-                    print(f"❌\n")
+                    print("⊘")
                 
                 finally:
                     if driver:
@@ -440,13 +418,10 @@ def main():
                         except:
                             pass
                 
-                time.sleep(0.5)
+                time.sleep(0.3)
         
         print("\n" + "=" * 70)
-        print(f"✅ انتهت العملية!")
-        print(f"   ✅ نجح: {successful}")
-        print(f"   ❌ فشل: {len(retry_list) - (len(retry_list) - sum(1 for w in retry_list if w not in manager.wallets))}")
-        print(f"   📊 المتبقي: {len(manager.wallets)}")
+        print(f"✅ النتيجة: {successful} نجح | {manager.get_remaining()} متبقي")
         print("=" * 70 + "\n")
         
     except Exception:
